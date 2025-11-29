@@ -1,0 +1,88 @@
+#!/bin/sh
+set -e
+
+# Check dependencies
+if ! command -v incus >/dev/null 2>&1; then
+  echo "Error: incus command not found."
+  exit 1
+fi
+if ! command -v nix >/dev/null 2>&1; then
+  echo "Error: nix command not found."
+  exit 1
+fi
+
+# Global variables
+INCUS_PROFILE="inx-container"
+NIX_PROFILE_PREFIX="/nix/var/nix/profiles/inx-container"
+
+isVerbose() {
+  case "$VERBOSE" in
+    1 | [yY][eE][sS] | [tT][rR][uU][eE] | [oO][nN]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run() {
+  if isVerbose; then
+    echo "+ $@"
+    "$@"
+  else
+    "$@" >/dev/null 2>&1
+  fi
+}
+
+printHelp() {
+  cat << EOF
+Usage: inx-container [subcommand]
+Subcommands:
+  help                Show this help message
+  create <name>       Create a new container with the inx-container profile
+EOF
+}
+
+createOrUpdateProfile() {
+  if incus profile show $INCUS_PROFILE >/dev/null 2>&1; then
+    run incus profile edit $INCUS_PROFILE < ./config.yaml
+  else
+    run incus profile create $INCUS_PROFILE < ./config.yaml
+  fi
+}
+
+# Entry point
+if [ $# -le 0 ]
+  then
+    SUBCOMMAND="help"
+  else
+    SUBCOMMAND=$1
+fi
+
+case $SUBCOMMAND in
+  help)
+    printHelp
+    exit 0
+    ;;
+
+  create)
+    createOrUpdateProfile
+    if [ $# -lt 2 ]; then
+      echo "Error: 'create' subcommand requires <name> argument."
+      printHelp
+      exit 1
+    fi
+    NAME=$2
+    FLAKE_PATH=${3:-.}
+    profilePath="${NIX_PROFILE_PREFIX}/${NAME}"
+    installable="${FLAKE_PATH}#nixosConfigurations.${NAME}.config.system.build.toplevel"
+    run mkdir -p "${profilePath}"
+    run nix build --profile "${profilePath}/system" "${installable}"
+    run incus create "${NAME}" --empty
+    run incus profile add "${NAME}" "${INCUS_PROFILE}"
+    run incus config device add "${NAME}" nixprofiles disk source="${profilePath}" path=/nix/var/nix/profiles
+    run incus config set "${NAME}" raw.lxc="lxc.init.cmd=/nix/var/nix/profiles/system/init"
+    exit 0
+    ;;
+
+esac
+echo "Error: Unknown subcommand '$SUBCOMMAND'"
+printHelp
+exit 1

@@ -1,0 +1,6 @@
+# Common incus configs for inx containers
+devices:
+  nixstore:
+    path: /nix/store
+    source: /nix/store
+    type: disk

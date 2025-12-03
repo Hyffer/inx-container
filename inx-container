@@ -35,8 +35,9 @@ printHelp() {
   cat << EOF
 Usage: inx-container [subcommand]
 Subcommands:
-  help                Show this help message
-  create <name>       Create a new container with the inx-container profile
+  help                          Show this help message
+  create <name> <flake-path>    Create a new container with the inx-container profile
+  update <name> <flake-path>    Switch the container to the latest configuration
 EOF
 }
 
@@ -79,6 +80,26 @@ case $SUBCOMMAND in
     run incus profile add "${NAME}" "${INCUS_PROFILE}"
     run incus config device add "${NAME}" nixprofiles disk source="${profilePath}" path=/nix/var/nix/profiles shift=true
     run incus config set "${NAME}" raw.lxc="lxc.init.cmd=/nix/var/nix/profiles/system/init"
+    exit 0
+    ;;
+
+  update)
+    createOrUpdateProfile
+    if [ $# -lt 2 ]; then
+      echo "Error: 'update' subcommand requires <name> argument."
+      printHelp
+      exit 1
+    fi
+    NAME=$2
+    FLAKE_PATH=${3:-.}
+    profilePath="${NIX_PROFILE_PREFIX}/${NAME}"
+    oldSystemProfile=$(realpath ${profilePath}/system)
+    installable="${FLAKE_PATH}#nixosConfigurations.${NAME}.config.system.build.toplevel"
+    run nix build --profile "${profilePath}/system" "${installable}"
+    newSystemProfile=$(realpath ${profilePath}/system)
+    if [ "${oldSystemProfile}" != "${newSystemProfile}" ] && [ "$(incus info "${NAME}" | grep RUNNING)" != "" ]; then
+      run incus exec "${NAME}" -- /nix/var/nix/profiles/system/bin/switch-to-configuration switch
+    fi
     exit 0
     ;;
 

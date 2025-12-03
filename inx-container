@@ -77,7 +77,7 @@ case $SUBCOMMAND in
     run nix build --profile "${profilePath}/system" "${installable}"
     run incus create "${NAME}" --empty
     run incus profile add "${NAME}" "${INCUS_PROFILE}"
-    run incus config device add "${NAME}" nixprofiles disk source="${profilePath}" path=/nix/var/nix/profiles
+    run incus config device add "${NAME}" nixprofiles disk source="${profilePath}" path=/nix/var/nix/profiles shift=true
     run incus config set "${NAME}" raw.lxc="lxc.init.cmd=/nix/var/nix/profiles/system/init"
     exit 0
     ;;

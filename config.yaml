@@ -4,3 +4,17 @@ devices:
     path: /nix/store
     source: /nix/store
     type: disk
+    readonly: true
+    shift: true
+  nixsocket:
+    path: /nix/var/nix/daemon-socket
+    source: /nix/var/nix/daemon-socket
+    type: disk
+    readonly: true
+    shift: true
+  nixdb:
+    path: /nix/var/nix/db
+    source: /nix/var/nix/db
+    type: disk
+    readonly: true
+    shift: true

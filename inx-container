@@ -14,6 +14,7 @@ fi
 # Global variables
 INCUS_PROFILE="inx-container"
 NIX_PROFILE_PREFIX="/nix/var/nix/profiles/inx-container"
+BASEDIR=$(realpath $(dirname $0))
 
 isVerbose() {
   case "$VERBOSE" in
@@ -43,9 +44,9 @@ EOF
 
 createOrUpdateProfile() {
   if incus profile show $INCUS_PROFILE >/dev/null 2>&1; then
-    run incus profile edit $INCUS_PROFILE < ./config.yaml
+    run incus profile edit $INCUS_PROFILE < "${BASEDIR}/config.yaml"
   else
-    run incus profile create $INCUS_PROFILE < ./config.yaml
+    run incus profile create $INCUS_PROFILE < "${BASEDIR}/config.yaml"
   fi
 }
 

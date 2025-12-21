@@ -80,6 +80,7 @@ case $SUBCOMMAND in
     run incus create "${NAME}" --empty
     run incus profile add "${NAME}" "${INCUS_PROFILE}"
     run incus config device add "${NAME}" nixprofiles disk source="${profilePath}" path=/nix/var/nix/profiles shift=true
+    run incus config device add "${NAME}" localtime disk source=/etc/localtime path=/etc/localtime shift=true readonly=true
     run incus config set "${NAME}" raw.lxc="lxc.init.cmd=/nix/var/nix/profiles/system/init"
     exit 0
     ;;

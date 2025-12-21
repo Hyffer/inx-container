@@ -2,7 +2,7 @@
 
 let
   pname = "inx-container";
-  version = "0.0.1";
+  version = "0.0.2";
 in
 
 runCommand "${pname}-${version}"

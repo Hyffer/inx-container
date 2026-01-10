@@ -1,14 +1,31 @@
 #!/bin/sh
 set -e
 
+printHelp() {
+  cat << EOF
+Usage: inx-container [subcommand]
+Subcommands:
+  help                              Show this help message
+  create <name> --flake <flakeref>  Create a new container with the inx-container profile
+  update <name> --flake <flakeref>  Switch the container to the latest configuration
+EOF
+}
+
+panic() {
+  echo "$@" >&2
+  exit 1
+}
+
+err() {
+  echo "$@" >&2
+}
+
 # Check dependencies
 if ! command -v incus >/dev/null 2>&1; then
-  echo "Error: incus command not found."
-  exit 1
+  panic "Error: incus command not found"
 fi
 if ! command -v nix >/dev/null 2>&1; then
-  echo "Error: nix command not found."
-  exit 1
+  panic "Error: nix command not found"
 fi
 
 # Global variables
@@ -16,33 +33,77 @@ INCUS_PROFILE="inx-container"
 NIX_PROFILE_PREFIX="/nix/var/nix/profiles/inx-container"
 BASEDIR=$(realpath $(dirname $0))
 
-isVerbose() {
-  case "$VERBOSE" in
-    1 | [yY][eE][sS] | [tT][rR][uU][eE] | [oO][nN]) return 0 ;;
-    *) return 1 ;;
-  esac
+WORKDIR=$(mktemp -t -d inx-container.XXXXXX)
+cleanup_WORKDIR() {
+  rm -rf "$WORKDIR"
 }
+trap cleanup_WORKDIR EXIT
 
+case $VERBOSE in
+  1 | [yY][eE][sS] | [tT][rR][uU][eE] | [oO][nN]) ;;
+  *) unset VERBOSE ;;
+esac
+
+# Argument parsing
+action=$1
+name=$2
+flake=
+
+case $action in
+  create | update)
+    if [ -z "$name" ]; then
+      err "$0: '$action' requires a container name"
+      printHelp
+      exit 1
+    fi
+    shift 2
+    ;;
+  help | --help | -h)
+    printHelp
+    exit 0
+    ;;
+  *)
+    err "$0: unknown subcommand '$action'"
+    printHelp
+    exit 1
+    ;;
+esac
+
+while [ "$#" -gt 0 ]; do
+  i=$1; shift
+  case $i in
+    help | --help | -h)
+      printHelp
+      exit 0
+      ;;
+    --flake)
+      if [ -z "$1" ]; then
+        panic "$0: '--flake' requires an argument"
+      fi
+      flake=$1
+      shift
+      ;;
+    --verbose|-v|-vv|-vvv|-vvvv|-vvvvv)
+      VERBOSE=1
+      ;;
+    *)
+      panic "$0: unknown option '$i'"
+      ;;
+  esac
+done
+
+# Execution one step, with optional echo.
+# This will change command's output, so don't use it where output matters.
 run() {
-  if isVerbose; then
+  if [ -n "$VERBOSE" ]; then
     echo "+ $@"
     "$@"
   else
-    "$@" >/dev/null 2>&1
+    "$@" >/dev/null
   fi
 }
 
-printHelp() {
-  cat << EOF
-Usage: inx-container [subcommand]
-Subcommands:
-  help                          Show this help message
-  create <name> <flake-path>    Create a new container with the inx-container profile
-  update <name> <flake-path>    Switch the container to the latest configuration
-EOF
-}
-
-createOrUpdateProfile() {
+createOrUpdateIncusProfile() {
   if incus profile show $INCUS_PROFILE >/dev/null 2>&1; then
     run incus profile edit $INCUS_PROFILE < "${BASEDIR}/config.yaml"
   else
@@ -50,62 +111,62 @@ createOrUpdateProfile() {
   fi
 }
 
-# Entry point
-if [ $# -le 0 ]
-  then
-    SUBCOMMAND="help"
-  else
-    SUBCOMMAND=$1
-fi
+nixFlakeBuild() {
+  if [[ -z $flake && -e /etc/nixos/flake.nix ]]; then
+    flake="$(dirname "$(readlink -f /etc/nixos/flake.nix)")"
+  fi
+  if [[ -z $flake ]]; then
+    panic "Error: No flake specified"
+  fi
 
-case $SUBCOMMAND in
-  help)
-    printHelp
-    exit 0
-    ;;
+  if [[ $flake =~ ^(.*)\#([^\#\"]*)$ ]]; then
+    flake="${BASH_REMATCH[1]}"
+    flakeAttr="${BASH_REMATCH[2]}"
+  fi
+  if [[ -z $flakeAttr ]]; then
+    flakeAttr="nixosConfigurations.\"$name\""
+  else
+    flakeAttr="nixosConfigurations.\"$flakeAttr\""
+  fi
+  installable="${flake}#${flakeAttr}.config.system.build.toplevel"
+  run nix build -o "${WORKDIR}/result" "${installable}"
+}
+
+# Entry point
+case $action in
+  create | update)
+    createOrUpdateIncusProfile
+    profilePath="${NIX_PROFILE_PREFIX}/${name}"
+    if [ ! -d "${profilePath}" ]; then
+      run mkdir -p "${profilePath}"
+    fi
+    
+    nixFlakeBuild
+    newSystemProfile=$(readlink -f "${WORKDIR}/result")
+    if [ ! -d "${newSystemProfile}" ]; then
+      panic "Unexpected error: build output not found"
+    fi
+    run nix-env -p "${profilePath}/system" --set "${newSystemProfile}"
+    ;;&
 
   create)
-    createOrUpdateProfile
-    if [ $# -lt 2 ]; then
-      echo "Error: 'create' subcommand requires <name> argument."
-      printHelp
-      exit 1
-    fi
-    NAME=$2
-    FLAKE_PATH=${3:-.}
-    profilePath="${NIX_PROFILE_PREFIX}/${NAME}"
-    installable="${FLAKE_PATH}#nixosConfigurations.${NAME}.config.system.build.toplevel"
-    run mkdir -p "${profilePath}"
-    run nix build --profile "${profilePath}/system" "${installable}"
-    run incus create "${NAME}" --empty
-    run incus profile add "${NAME}" "${INCUS_PROFILE}"
-    run incus config device add "${NAME}" nixprofiles disk source="${profilePath}" path=/nix/var/nix/profiles shift=true
-    run incus config device add "${NAME}" localtime disk source=/etc/localtime path=/etc/localtime shift=true readonly=true
-    run incus config set "${NAME}" raw.lxc="lxc.init.cmd=/nix/var/nix/profiles/system/init"
+    run incus create "${name}" --empty
+    run incus profile add "${name}" "${INCUS_PROFILE}"
+    run incus config device add "${name}" nixprofiles disk source="${profilePath}" path=/nix/var/nix/profiles shift=true
+    run incus config device add "${name}" localtime disk source=/etc/localtime path=/etc/localtime shift=true readonly=true
+    run incus config set "${name}" raw.lxc="lxc.init.cmd=/nix/var/nix/profiles/system/init"
     exit 0
     ;;
 
   update)
-    createOrUpdateProfile
-    if [ $# -lt 2 ]; then
-      echo "Error: 'update' subcommand requires <name> argument."
-      printHelp
-      exit 1
+    if [ -z "$(incus info "${name}" | grep RUNNING)" ]; then
+      exit 0
     fi
-    NAME=$2
-    FLAKE_PATH=${3:-.}
-    profilePath="${NIX_PROFILE_PREFIX}/${NAME}"
-    oldSystemProfile=$(realpath ${profilePath}/system)
-    installable="${FLAKE_PATH}#nixosConfigurations.${NAME}.config.system.build.toplevel"
-    run nix build --profile "${profilePath}/system" "${installable}"
-    newSystemProfile=$(realpath ${profilePath}/system)
-    if [ "${oldSystemProfile}" != "${newSystemProfile}" ] && [ "$(incus info "${NAME}" | grep RUNNING)" != "" ]; then
-      run incus exec "${NAME}" -- /nix/var/nix/profiles/system/bin/switch-to-configuration switch
+    oldSystemProfile=$(incus exec "${name}" -- readlink -f /run/current-system)
+    if [ "${oldSystemProfile}" != "${newSystemProfile}" ]; then
+      run incus exec "${name}" -- /nix/var/nix/profiles/system/bin/switch-to-configuration switch
     fi
     exit 0
     ;;
 
 esac
-echo "Error: Unknown subcommand '$SUBCOMMAND'"
-printHelp
-exit 1

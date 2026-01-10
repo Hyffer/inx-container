@@ -17,7 +17,7 @@ Firstly, manually create a directory `/nix/var/nix/profiles/inx-container` ([mor
 Then, there is an example folder in this repo, cd into example folder,
 
 ```
-inx-container create inx-ex .
+inx-container create inx-ex --flake .
 ```
 
 The system should be built and placed under `/nix/var/nix/profiles/inx-container/inx-ex`. And a incus container named "inx-ex" should be created but not started.
@@ -27,7 +27,7 @@ From now on, "inx-ex" is just a normal incus container, not much different from 
 Next time after editing the configration,
 
 ```
-inx-container update inx-ex .
+inx-container update inx-ex --flake .
 ```
 
 ## Notice

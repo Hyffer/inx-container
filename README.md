@@ -68,6 +68,16 @@ nixos-container mounts `/nix/var/nix/gcroots/per-container/$INSTANCE` on host to
 
 Inside nixos-container, `NIX_REMOTE=daemon` is absent in sudo environment. But both root and non-root user's environments are correct. Only sudo a nix command will fail.
 
+### LXC tmpfs as root
+
+If you are familiar with [impermanence](https://github.com/nix-community/impermanence), you might want to bring that to container as well. But it turns out not to be a trivial thing. Although incus 6.16 has introduced tmpfs and tmpfs-overlay disk types, [it does not support using them as root disk](https://discuss.linuxcontainers.org/t/tmpfs-tmpfs-overlay-as-root/25800).
+
+Here are some different ways to make up a "volatile root" for container:
+
+- use `incus rebuild <container-name> --empty` to clear root disk
+- mount tmpfs on each folder under root (/bin, /etc, /home, etc.)
+- use a custom incus storage pool backed by tmpfs
+
 ### Declarative and Purity
 
 inx-container is just a command line helper, calling nix and incus to set up container properly. It does not offer the declarative that [`containers`](https://search.nixos.org/options?channel=25.11&show=containers&query=containers) option provides. Which could be improved to some extent.
